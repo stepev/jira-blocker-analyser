@@ -79,13 +79,14 @@ def comments_text(comments, flag_set_time, flag_removed_time):
     for comment in comments:
         comment_time = datetime.strptime(comment.created, '%Y-%m-%dT%H:%M:%S.%f%z')
         if flag_set_time <= comment_time <= flag_removed_time:
-            text += comment.body + '\n'
+            text += comment.body + '\n---\n'
     return text
 
 def main():
     parser = argparse.ArgumentParser(description='Script for flagged blockers analysis')
     parser.add_argument('--jira-server', default='https://jira.domain.name', type=str, help='Jira server URL')
-    parser.add_argument('--project', default='jiraprojectkey', type=str, help='Jira project key')
+    parser.add_argument('--jql', type=str, help='Use additional JQL parameters to select issues to analyse. If you specified project or team in arguments, do not use same clause in the JQL. Do not speicify "resolutiondate >= ..." in the JQL, use "---date" argument instead') # add your full JQL or additional conditions if needed
+    parser.add_argument('--project', type=str, help='Jira project key') # add your default project if needed
     parser.add_argument('--team', type=str, help='Jira team field, in case several teams are working in a single project') # add your default team if needed
     parser.add_argument('--date', default=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'), type=str, help='Start date')
     parser.add_argument('--user', default='username', type=str, help='User name')
@@ -108,9 +109,17 @@ def main():
 #    spinner.spinner = "|/-\\"
 #with yaspin(spinner, text="Loading data from Jira", color="yellow") as spinner:
 
-    jql_query = f'project = {args.project} and resolutiondate >= {args.date} and comment ~ "(flag) Flag added"'
+    jql_query = args.jql if args.jql else ''
+    if args.project:
+        jql_query += f' and project = {args.project}' if jql_query else f'project = {args.project}'
     if args.team:
-        jql_query += f' and Team = {args.team}'
+        jql_query += f' and Team = {args.team}' if jql_query else f'Team = {args.team}'
+    if args.date:
+        jql_query += f' and resolutiondate >= {args.date}' if jql_query else f'resolutiondate >= {args.date}'
+# Append the mandatory clause
+    jql_query += f' and comment ~ "(flag) Flag added"'
+
+    print (f'JQL query used: {jql_query}')
 
     while True:
         chunk = jira.search_issues(jql_query, 
