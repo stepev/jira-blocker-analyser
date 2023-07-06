@@ -86,6 +86,7 @@ def main():
     parser = argparse.ArgumentParser(description='Script for flagged blockers analysis')
     parser.add_argument('--jira-server', default='https://jira.domain.name', type=str, help='Jira server URL')
     parser.add_argument('--project', default='jiraprojectkey', type=str, help='Jira project key')
+    parser.add_argument('--team', type=str, help='Jira team field, in case several teams are working in a single project') # add your default team if needed
     parser.add_argument('--date', default=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'), type=str, help='Start date')
     parser.add_argument('--user', default='username', type=str, help='User name')
     parser.add_argument('--password', default='password', type=str, help='Password')
@@ -106,9 +107,13 @@ def main():
 #   spinner = yaspin(text="Loading", color="yellow")
 #    spinner.spinner = "|/-\\"
 #with yaspin(spinner, text="Loading data from Jira", color="yellow") as spinner:
-    
+
+    jql_query = f'project = {args.project} and resolutiondate >= {args.date} and comment ~ "(flag) Flag added"'
+    if args.team:
+        jql_query += f' and Team = {args.team}'
+
     while True:
-        chunk = jira.search_issues(f'project = {args.project} and resolutiondate >= {args.date} and comment ~ "(flag) Flag added"', 
+        chunk = jira.search_issues(jql_query, 
                                startAt=startAt,
                                maxResults=maxResults)
         if len(chunk) == 0:
