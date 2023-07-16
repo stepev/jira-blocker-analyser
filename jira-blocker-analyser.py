@@ -31,20 +31,20 @@ def process_issue(jira, issue):
                 elif item.fromString == 'Impediment':
                     flag_removed_time = history_created_time
 
-                # Если установлены и время установки, и время снятия флага, выводим информацию о блокировке и сбрасываем переменные
-                if flag_set_time and flag_removed_time:
-                    blocker_info = blocker_info_to_dict(issue, flag_set_time, flag_removed_time, comments, 'false')
-                    blocker_infos.append(blocker_info)
-                    flag_set_time = None
-                    flag_removed_time = None
-                # Если установлено только время флага, ищем ближайшую смену статуса
-                if flag_set_time and not flag_removed_time:
-                    status_change_times.sort()
-                    index = bisect_right(status_change_times, flag_set_time)
-                    if index != len(status_change_times):
-                        blocker_info = blocker_info_to_dict(issue, flag_set_time, status_change_times[index], comments, 'true')
-                        blocker_infos.append(blocker_info)
-    return blocker_infos  
+            # Если установлены и время установки, и время снятия флага, выводим информацию о блокировке и сбрасываем переменные
+            if flag_set_time and flag_removed_time:
+                blocker_info = blocker_info_to_dict(issue, flag_set_time, flag_removed_time, comments, False)
+                blocker_infos.append(blocker_info)
+                flag_set_time = None
+                flag_removed_time = None
+
+    # If the flag is still set at the end of history, use the last status change time as the flag removed time
+    if flag_set_time and not flag_removed_time:
+        flag_removed_time = status_change_times[-1]  # Use the last status change time
+        blocker_info = blocker_info_to_dict(issue, flag_set_time, flag_removed_time, comments, True)
+        blocker_infos.append(blocker_info)
+
+    return blocker_infos
 
 def blocker_info_to_dict(issue, flag_set_time, flag_removed_time, comments, flag_was_not_removed):
     info_dict = dict()
@@ -119,8 +119,6 @@ def main():
 # Append the mandatory clause
     jql_query += f' and comment ~ "(flag) Flag added"'
 
-    print (f'JQL query used: {jql_query}')
-
     while True:
         chunk = jira.search_issues(jql_query, 
                                startAt=startAt,
@@ -134,6 +132,10 @@ def main():
     
     all_blocker_info = []
 
+    print(f">>>>> Found {len(issues)} issues <<<<<\n\n")
+    print (f'JQL query used: {jql_query}')
+
+
     for issue in issues:
         blocker_infos = process_issue(jira, issue)
         all_blocker_info.extend(blocker_infos)  # use extend instead of append to add each dictionary separately
@@ -142,8 +144,9 @@ def main():
             print('.', end='')
     print()
 
+    print(f">>>>> Found {len(all_blocker_info)} blockers <<<<<\n\n")
+
     if args.mode == 'print':
-        print(f">>>>> Found {len(issues)} issues <<<<<\n\n")
         for blocker_info in all_blocker_info:
             print(f"\n>>> Issue: {blocker_info['Issue Key']} - {blocker_info['Issue Summary']} <<<\n")
             print(f"Block set:     {blocker_info['Flag Set Time']}")
