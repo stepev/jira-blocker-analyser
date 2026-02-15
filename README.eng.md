@@ -1,6 +1,6 @@
 # jira-blocker-analyser
 ## Blocker clustering
-"Blocker clustering" is one of the key important practices of the Kanban method, designed to reveal anв review obstacles or "blockers" that slow down the workflow and affects work items Lead Time. In practice, blockers are what prevent tasks from being carried out and stop their movement on the Kanban board.
+"Blocker clustering" is one of the key important practices of the Kanban method, designed to reveal and review obstacles or "blockers" that slow down the workflow and affects work items Lead Time. In practice, blockers are what prevent tasks from being carried out and stop their movement on the Kanban board.
 
 The essence of the "Blocker clustering" practice lies in the gathering of blocker information, their categorisation, and analysis. This helps teams see common patterns, understand the causes behind these obstacles and find solutions for their elimination. Essentially, it is a practice of risk management.
 
@@ -24,8 +24,8 @@ The script connects via API to your Jira, selects all tasks that have ever been 
 * Issue key
 * Task title (Issue Summary)
 * Date and time of setting and lifting the blockage (flag)
-    *  If flag was not removed, the moment of the first issue status change is uded instead. Additionally this fact is marked, so the team can check if they manage flags properly.
-*  Total blocking time
+    *  If flag was not removed, the moment of the first issue status change is used instead. Additionally this fact is marked, so the team can check if they manage flags properly.
+*  Total blocking time (in days or hours — set by **--time-unit** parameter)
 *  Blocker category
     * The script looks in comments for a word beginning with # and consider this word as a blocker category name
 * All comments during the blocked period
@@ -53,7 +53,9 @@ The following command line parameters are provided:
 
 **--category-pattern**: Optional. regexp pattern for searching in a comment the blocking category. By default, a word beginning with '#' is searched for. If you use another method, set the search criteria for it here
 
+**--time-unit**: Optional. Unit for displaying blocking time: `days` or `hours`. Default is `days`. Internally the script stores time in seconds; conversion to days or hours is done only when outputting (to console, CSV, or Excel).
+
 Working with the script is simple: set the values you need for the listed parameters, and the script will get from Jira all tasks in the specified project, closed starting from the specified date, which had at least once been flagged and will perform block analysis according to the specified parameters. You can set your default values by editing the script. Be careful, it is not recommended to save the password in the script.
 
 ## Feedback
-Please create an issue here at github if you found any problems in the script or want to propose an improvement. Contrubition is welcome as well.
+Please create an issue here at github if you found any problems in the script or want to propose an improvement. Contribution is welcome as well.
