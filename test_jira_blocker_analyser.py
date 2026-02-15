@@ -28,6 +28,7 @@ blocker_category_from_comment = jira_blocker_analyser.blocker_category_from_comm
 comments_text = jira_blocker_analyser.comments_text
 blocker_info_to_dict = jira_blocker_analyser.blocker_info_to_dict
 process_issue = jira_blocker_analyser.process_issue
+format_blocking_time = jira_blocker_analyser.format_blocking_time
 
 
 def make_comment(created: str, body: str):
@@ -82,7 +83,7 @@ class TestProcessIssue(unittest.TestCase):
         self.assertEqual(result, [])
         jira.issue.assert_called_once_with("PROJ-1", expand="changelog")
 
-    def test_one_blocker_cycle_set_then_removed(self):
+    def test_one_blocker_cycle_set_then_removed_stores_seconds(self):
         histories = [
             make_history("2024-01-15T10:00:00.000000+0000", [
                 make_changelog_item("Flagged", to_string="Impediment"),
@@ -100,7 +101,7 @@ class TestProcessIssue(unittest.TestCase):
         self.assertEqual(result[0]["Issue Summary"], "Blocked task")
         self.assertEqual(result[0]["Flag Set Time"], "2024-01-15 10:00")
         self.assertEqual(result[0]["Flag Removed Time"], "2024-01-15 12:00")
-        self.assertEqual(result[0]["Time Blocked"], 0.1)  # 2 hours ≈ 0.083, rounded to 0.1
+        self.assertEqual(result[0]["Time Blocked"], 7200)  # 2 hours in seconds
         self.assertFalse(result[0]["Flag was not removed"])
 
     def test_flag_set_but_not_removed_uses_last_status_change(self):
@@ -122,6 +123,7 @@ class TestProcessIssue(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertTrue(result[0]["Flag was not removed"])
         self.assertEqual(result[0]["Flag Removed Time"], "2024-01-15 14:00")
+        self.assertEqual(result[0]["Time Blocked"], 4 * 3600)  # 4 hours in seconds
 
     def test_two_blocker_cycles(self):
         histories = [
@@ -145,8 +147,10 @@ class TestProcessIssue(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["Flag Set Time"], "2024-01-15 10:00")
         self.assertEqual(result[0]["Flag Removed Time"], "2024-01-15 11:00")
+        self.assertEqual(result[0]["Time Blocked"], 3600)  # 1 hour
         self.assertEqual(result[1]["Flag Set Time"], "2024-01-16 10:00")
         self.assertEqual(result[1]["Flag Removed Time"], "2024-01-16 12:00")
+        self.assertEqual(result[1]["Time Blocked"], 2 * 3600)  # 2 hours
 
     def test_status_changes_collected_for_fallback(self):
         histories = [
@@ -231,6 +235,26 @@ class TestBlockerCategoryFromComment(unittest.TestCase):
             "{external-service}"
         )
 
+    def test_custom_pattern_digits_prefix(self):
+        comments = [
+            make_comment("2024-01-15T10:00:00", "Category: [CAT-123]"),
+        ]
+        flag_set_time = datetime(2024, 1, 15, 10, 0, 0)
+        self.assertEqual(
+            blocker_category_from_comment(comments, flag_set_time, r"\[[\w-]+\]"),
+            "[CAT-123]"
+        )
+
+    def test_empty_pattern_returns_empty(self):
+        comments = [
+            make_comment("2024-01-15T10:00:00", "Text #tag"),
+        ]
+        flag_set_time = datetime(2024, 1, 15, 10, 0, 0)
+        self.assertEqual(
+            blocker_category_from_comment(comments, flag_set_time, r""),
+            ""
+        )
+
 
 class TestCommentsText(unittest.TestCase):
     def test_includes_only_comments_in_time_range(self):
@@ -281,49 +305,57 @@ class TestBlockerInfoToDict(unittest.TestCase):
         issue.fields.summary = summary
         return issue
 
-    def test_time_blocked_calculation_days(self):
+    def test_time_blocked_stored_in_seconds(self):
         issue = self._make_issue()
         flag_set = datetime(2024, 1, 15, 10, 0, 0)
         flag_removed = datetime(2024, 1, 18, 10, 0, 0)  # 3 days
         comments = []
-        result = blocker_info_to_dict(
-            issue, flag_set, flag_removed, comments, False
-        )
-        self.assertEqual(result["Time Blocked"], 3.0)
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
+        self.assertEqual(result["Time Blocked"], 3 * 24 * 3600)  # 259200 seconds
         self.assertEqual(result["Issue Key"], "PROJ-1")
         self.assertEqual(result["Issue Summary"], "Test issue")
         self.assertEqual(result["Flag was not removed"], False)
 
-    def test_time_blocked_fractional_days(self):
+    def test_time_blocked_seconds_fractional_days(self):
         issue = self._make_issue()
         flag_set = datetime(2024, 1, 15, 0, 0, 0)
         flag_removed = datetime(2024, 1, 16, 12, 0, 0)  # 1.5 days
         comments = []
-        result = blocker_info_to_dict(
-            issue, flag_set, flag_removed, comments, False
-        )
-        self.assertEqual(result["Time Blocked"], 1.5)
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
+        self.assertEqual(result["Time Blocked"], 1.5 * 24 * 3600)  # 129600 seconds
+
+    def test_time_blocked_seconds_hours(self):
+        issue = self._make_issue()
+        flag_set = datetime(2024, 1, 15, 10, 0, 0)
+        flag_removed = datetime(2024, 1, 15, 13, 0, 0)  # 3 hours
+        comments = []
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
+        self.assertEqual(result["Time Blocked"], 3 * 3600)
 
     def test_flag_times_formatted(self):
         issue = self._make_issue()
         flag_set = datetime(2024, 1, 15, 10, 30, 0)
         flag_removed = datetime(2024, 1, 15, 14, 45, 0)
         comments = []
-        result = blocker_info_to_dict(
-            issue, flag_set, flag_removed, comments, False
-        )
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
         self.assertEqual(result["Flag Set Time"], "2024-01-15 10:30")
         self.assertEqual(result["Flag Removed Time"], "2024-01-15 14:45")
 
-    def test_flag_was_not_removed_stored(self):
+    def test_flag_was_not_removed_stored_true(self):
         issue = self._make_issue()
         flag_set = datetime(2024, 1, 15, 10, 0, 0)
         flag_removed = datetime(2024, 1, 16, 10, 0, 0)
         comments = []
-        result = blocker_info_to_dict(
-            issue, flag_set, flag_removed, comments, True
-        )
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, True)
         self.assertTrue(result["Flag was not removed"])
+
+    def test_flag_was_not_removed_stored_false(self):
+        issue = self._make_issue()
+        flag_set = datetime(2024, 1, 15, 10, 0, 0)
+        flag_removed = datetime(2024, 1, 16, 10, 0, 0)
+        comments = []
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
+        self.assertFalse(result["Flag was not removed"])
 
     def test_blocker_category_key_present(self):
         """Blocker Category key is present; value comes from blocker_category_from_comment.
@@ -334,9 +366,7 @@ class TestBlockerInfoToDict(unittest.TestCase):
         comments = [
             make_comment("2024-01-15T10:00:00.000000+0000", "Blocker #deployment"),
         ]
-        result = blocker_info_to_dict(
-            issue, flag_set, flag_removed, comments, False
-        )
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
         self.assertIn("Blocker Category", result)
         # Category lookup uses naive comment time; with aware flag_set they don't match, so '' here
         self.assertEqual(result["Blocker Category"], "")
@@ -348,11 +378,42 @@ class TestBlockerInfoToDict(unittest.TestCase):
         comments = [
             make_comment("2024-01-15T11:00:00.000000+0000", "Comment in range"),
         ]
-        result = blocker_info_to_dict(
-            issue, flag_set, flag_removed, comments, False
-        )
+        result = blocker_info_to_dict(issue, flag_set, flag_removed, comments, False)
         self.assertIn("Comment in range", result["Comments"])
         self.assertIn("---\n", result["Comments"])
+        self.assertEqual(result["Time Blocked"], 2 * 3600)  # 2 hours in seconds
+
+
+class TestFormatBlockingTime(unittest.TestCase):
+    """Conversion from seconds to display value (only at output time)."""
+
+    def test_seconds_to_days(self):
+        value, unit = format_blocking_time(259200, 'days')  # 3 days
+        self.assertEqual(value, 3.0)
+        self.assertEqual(unit, 'days')
+
+    def test_seconds_to_days_fractional(self):
+        value, unit = format_blocking_time(7200, 'days')  # 2 hours
+        self.assertEqual(value, 0.1)  # 7200/86400 rounded to 1 decimal
+        self.assertEqual(unit, 'days')
+
+    def test_seconds_to_hours(self):
+        value, unit = format_blocking_time(7200, 'hours')  # 2 hours
+        self.assertEqual(value, 2.0)
+        self.assertEqual(unit, 'hours')
+
+    def test_seconds_to_hours_fractional(self):
+        value, unit = format_blocking_time(5400, 'hours')  # 1.5 hours
+        self.assertEqual(value, 1.5)
+        self.assertEqual(unit, 'hours')
+
+    def test_zero_seconds(self):
+        value_d, unit_d = format_blocking_time(0, 'days')
+        value_h, unit_h = format_blocking_time(0, 'hours')
+        self.assertEqual(value_d, 0.0)
+        self.assertEqual(unit_d, 'days')
+        self.assertEqual(value_h, 0.0)
+        self.assertEqual(unit_h, 'hours')
 
 
 if __name__ == "__main__":
