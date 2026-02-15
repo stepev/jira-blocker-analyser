@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import numpy as np
 import argparse
 import re
 from jira import JIRA
@@ -54,7 +53,7 @@ def blocker_info_to_dict(issue, flag_set_time, flag_removed_time, comments, flag
     info_dict['Flag Removed Time'] = flag_removed_time.strftime('%Y-%m-%d %H:%M')
 
     time_flagged = flag_removed_time - flag_set_time
-    info_dict['Time Blocked'] = np.round(time_flagged.total_seconds() / (24*60*60), 1)
+    info_dict['Time Blocked'] = time_flagged.total_seconds()  # always in seconds
 
     info_dict['Blocker Category'] = blocker_category_from_comment(comments, flag_set_time, category_pattern)
     info_dict['Comments'] = comments_text(comments, flag_set_time, flag_removed_time)
@@ -82,6 +81,14 @@ def comments_text(comments, flag_set_time, flag_removed_time):
             text += comment.body + '\n---\n'
     return text
 
+
+def format_blocking_time(seconds, time_unit):
+    """Convert seconds to display value in days or hours. Returns (value, unit_str)."""
+    if time_unit == 'hours':
+        return round(seconds / 3600, 1), 'hours'
+    return round(seconds / 86400, 1), 'days'
+
+
 def main():
     parser = argparse.ArgumentParser(description='Script for flagged blockers analysis')
     parser.add_argument('--jira-server', default='https://jira.domain.name', type=str, help='Jira server URL')
@@ -94,6 +101,7 @@ def main():
     parser.add_argument("--mode", default='print', type=str, help="Output mode: print / csv / xlsx")
     parser.add_argument("--output-file", default='blockers', type=str, help="Output file name without extension, use with --mode: xlsx or csv")
     parser.add_argument('--category-pattern', default=r"#\w+", type=str, help='Pattern for searching a blocker category in comments')
+    parser.add_argument('--time-unit', default='days', choices=['days', 'hours'], help='Output blocking time in days or hours')
     args = parser.parse_args()
 
     global jira
@@ -148,12 +156,13 @@ def main():
 
     if args.mode == 'print':
         for blocker_info in all_blocker_info:
+            display_value, unit_str = format_blocking_time(blocker_info['Time Blocked'], args.time_unit)
             print(f"\n>>> Issue: {blocker_info['Issue Key']} - {blocker_info['Issue Summary']} <<<\n")
             print(f"Block set:     {blocker_info['Flag Set Time']}")
             print(f"Block removed: {blocker_info['Flag Removed Time']}\n")
             if blocker_info['Flag was not removed']:
                 print("Flag was not removed!!! First status change after flag set considered as blocker removed\n")
-            print(f"Time blocked (days): {blocker_info['Time Blocked']}\n=======\n")
+            print(f"Time blocked ({unit_str}): {display_value}\n=======\n")
             if blocker_info['Blocker Category']:
                 print(f"Blocker category: {blocker_info['Blocker Category']}\n______")
             print(f"Comment: \n{blocker_info['Comments']}\n")
@@ -161,16 +170,21 @@ def main():
     elif args.mode == 'csv':
         now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         with open(f"{args.output_file}-{now.replace(':', '-')}.csv", "w", newline="") as csvfile:
-            fieldnames = ['Issue Key', 'Issue Summary', 'Flag Set Time', 'Flag Removed Time', 'Time Blocked', 'Blocker Category', 'Comments', 'Flag was not removed']
+            fieldnames = ['Issue Key', 'Issue Summary', 'Flag Set Time', 'Flag Removed Time', 'Time Blocked', 'Time Unit', 'Blocker Category', 'Comments', 'Flag was not removed']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
             writer.writeheader()
             for blocker_info in all_blocker_info:
-                writer.writerow(blocker_info)
+                display_value, unit_str = format_blocking_time(blocker_info['Time Blocked'], args.time_unit)
+                row = {**blocker_info, 'Time Blocked': display_value, 'Time Unit': unit_str}
+                writer.writerow(row)
 
     elif args.mode == 'xlsx':
         now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-        df = pd.DataFrame(all_blocker_info)
+        rows = []
+        for blocker_info in all_blocker_info:
+            display_value, unit_str = format_blocking_time(blocker_info['Time Blocked'], args.time_unit)
+            rows.append({**blocker_info, 'Time Blocked': display_value, 'Time Unit': unit_str})
+        df = pd.DataFrame(rows)
         df.to_excel(f'{args.output_file}-{now}.xlsx', index=False)
 
 if __name__ == "__main__":
